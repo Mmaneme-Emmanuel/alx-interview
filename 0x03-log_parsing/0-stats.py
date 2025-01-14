@@ -4,53 +4,68 @@ Log parsing script
 """
 
 import sys
-import re
+import signal
 
 
-def output(log: dict) -> None:
+def print_stats(log):
     """
-    Helper function to display statistics.
+    Print the current statistics
     """
     print("File size: {}".format(log["file_size"]))
     for code in sorted(log["code_frequency"]):
-        if log["code_frequency"][code]:
+        if log["code_frequency"][code] > 0:
             print("{}: {}".format(code, log["code_frequency"][code]))
 
 
-if __name__ == "__main__":
-    # Regular expression to match input format
-    regex = re.compile(
-        r'^(\S+) - \[(.*?)\] "GET /projects/260 HTTP/1.1" (\d{3}) (\d+)$'
-    )
+# Initialize log statistics
+log = {
+    "file_size": 0,
+    "code_frequency": {200: 0, 301: 0, 400: 0, 401: 0, 403: 0, 404: 0, 405: 0, 500: 0},
+}
+line_count = 0
 
-    line_count = 0
-    log = {
-        "file_size": 0,
-        "code_frequency": {str(code): 0 for code in [200, 301, 400, 401, 403, 404, 405, 500]}
-    }
 
-    try:
-        for line in sys.stdin:
-            line = line.strip()
-            match = regex.fullmatch(line)
-            if match:
-                line_count += 1
+def handle_interrupt(signum, frame):
+    """
+    Handle keyboard interruption to print stats before exiting
+    """
+    print_stats(log)
+    sys.exit(0)
 
-                # Extract fields
-                status_code = match.group(3)
-                file_size = int(match.group(4))
 
-                # Update metrics
-                log["file_size"] += file_size
-                if status_code in log["code_frequency"]:
-                    log["code_frequency"][status_code] += 1
+# Register signal handler for CTRL + C
+signal.signal(signal.SIGINT, handle_interrupt)
 
-                # Output after every 10 lines
-                if line_count % 10 == 0:
-                    output(log)
+try:
+    for line in sys.stdin:
+        try:
+            # Parse log line
+            parts = line.strip().split()
+            if len(parts) < 9:
+                continue
 
-    except KeyboardInterrupt:
-        pass
-    finally:
-        # Final output
-        output(log)
+            # Extract file size and status code
+            file_size = int(parts[-1])
+            status_code = int(parts[-2])
+
+            # Update total file size
+            log["file_size"] += file_size
+
+            # Update status code frequency
+            if status_code in log["code_frequency"]:
+                log["code_frequency"][status_code] += 1
+
+            # Increment line count
+            line_count += 1
+
+            # Print stats every 10 lines
+            if line_count % 10 == 0:
+                print_stats(log)
+
+        except Exception:
+            # Ignore lines that cannot be parsed
+            continue
+
+finally:
+    # Print final stats when exiting
+    print_stats(log)
